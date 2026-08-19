@@ -1,27 +1,39 @@
-import requests
+from data_loader import load_air_quality_data
 
 
-ENVIRONMENT_URL = (
-    "https://askdata.rks-gov.net/api/v1/en/ASKdata/"
-    "Environment"
+df_air = load_air_quality_data()
+
+
+print("\nFirst 10 rows:")
+print(df_air.head(10))
+
+
+print("\nShape:")
+print(df_air.shape)
+
+
+print("\nColumns:")
+print(df_air.columns.tolist())
+
+
+print("\nTotal municipalities:")
+print(df_air["Municipality"].nunique())
+
+
+print("\nAQI statistics:")
+print(df_air["AQI24h"].describe())
+
+
+print("\nBest air quality:")
+print(
+    df_air
+    .sort_values("AQI24h")
+    [
+        [
+            "Municipality",
+            "CurrentAQI",
+            "AQI24h"
+        ]
+    ]
+    .head(10)
 )
-
-
-response = requests.get(
-    ENVIRONMENT_URL,
-    timeout=30
-)
-
-print("Status:", response.status_code)
-
-response.raise_for_status()
-
-data = response.json()
-
-
-print("\nEnvironment categories:\n")
-
-for item in data:
-    print(
-        f"{item['id']} -> {item['text']}"
-    )
