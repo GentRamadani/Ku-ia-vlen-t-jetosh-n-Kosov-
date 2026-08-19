@@ -295,4 +295,237 @@ def load_employment_data():
         df["Municipality"] != "Kosovë"
     ].reset_index(drop=True)
 
+# ============================================================
+# ASKdata - Education
+# ============================================================
+
+EDUCATION_URL = (
+    "https://askdata.rks-gov.net/api/v1/en/ASKdata/"
+    "Census%20population/"
+    "2_Education/"
+    "tabcensusedu3.px"
+)
+
+
+def get_education_metadata():
+    """
+    Gets metadata for the education dataset from ASKdata.
+    """
+
+    response = requests.get(
+        EDUCATION_URL,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+def load_education_data():
+    """
+    Loads education data by municipality.
+
+    Calculates the percentage of population aged 15+
+    with higher education.
+
+    Higher education includes:
+    - Higher school
+    - College / Bachelor's degree
+    - Postgraduate degree
+    - Doctorate degree
+
+    Returns:
+        pd.DataFrame:
+            Municipality
+            HigherEducationRate
+    """
+
+    metadata = get_education_metadata()
+
+    # Find variables
+    sex_variable = next(
+        variable
+        for variable in metadata["variables"]
+        if variable["code"] == "Sex"
+    )
+
+    municipality_variable = next(
+        variable
+        for variable in metadata["variables"]
+        if variable["code"] == "Municipality"
+    )
+
+    education_variable = next(
+        variable
+        for variable in metadata["variables"]
+        if variable["code"] == "Highest level of education completed"
+    )
+
+    ethnicity_variable = next(
+        variable
+        for variable in metadata["variables"]
+        if variable["code"] == "Ethnicity"
+    )
+
+    # --------------------------------------------------------
+    # Select values
+    # --------------------------------------------------------
+
+    municipality_codes = municipality_variable["values"]
+
+    # Total sex
+    total_sex = sex_variable["values"][0]
+
+    # Total ethnicity
+    total_ethnicity = ethnicity_variable["values"][0]
+
+    # All education levels
+    education_codes = education_variable["values"]
+
+    query = {
+        "query": [
+            {
+                "code": sex_variable["code"],
+                "selection": {
+                    "filter": "item",
+                    "values": [total_sex]
+                }
+            },
+            {
+                "code": municipality_variable["code"],
+                "selection": {
+                    "filter": "item",
+                    "values": municipality_codes
+                }
+            },
+            {
+                "code": education_variable["code"],
+                "selection": {
+                    "filter": "item",
+                    "values": education_codes
+                }
+            },
+            {
+                "code": ethnicity_variable["code"],
+                "selection": {
+                    "filter": "item",
+                    "values": [total_ethnicity]
+                }
+            }
+        ],
+        "response": {
+            "format": "json-stat2"
+        }
+    }
+
+    # --------------------------------------------------------
+    # Request data
+    # --------------------------------------------------------
+
+    response = requests.post(
+        EDUCATION_URL,
+        json=query,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    # --------------------------------------------------------
+    # Get labels
+    # --------------------------------------------------------
+
+    municipality_labels = (
+        data["dimension"]["Municipality"]
+        ["category"]["label"]
+    )
+
+    education_labels = (
+        data["dimension"]["Highest level of education completed"]
+        ["category"]["label"]
+    )
+
+    values = data["value"]
+
+    municipalities = list(municipality_labels.values())
+    education_levels = list(education_labels.values())
+
+    # --------------------------------------------------------
+    # Build rows
+    # --------------------------------------------------------
+
+    rows = []
+
+    index = 0
+
+    for municipality in municipalities:
+
+        for education_level in education_levels:
+
+            rows.append({
+                "Municipality": municipality,
+                "EducationLevel": education_level,
+                "Population": values[index]
+            })
+
+            index += 1
+
+    df = pd.DataFrame(rows)
+
+    # --------------------------------------------------------
+    # Calculate higher education
+    # --------------------------------------------------------
+
+    higher_education_levels = [
+        "Higher school",
+        "College, Bachelor's degree",
+        "Postgraduate degree",
+        "Doctorate degree"
+    ]
+
+    higher_education = (
+        df[
+            df["EducationLevel"].isin(
+                higher_education_levels
+            )
+        ]
+        .groupby("Municipality")["Population"]
+        .sum()
+    )
+
+    total_population = (
+        df[
+            df["EducationLevel"] == "Total"
+        ]
+        .set_index("Municipality")["Population"]
+    )
+
+    result = pd.DataFrame({
+        "HigherEducation": higher_education,
+        "Total15Plus": total_population
+    }).reset_index()
+
+    # Calculate percentage
+    result["HigherEducationRate"] = (
+        result["HigherEducation"]
+        / result["Total15Plus"]
+        * 100
+    )
+
+    # Remove Kosovo total
+    result = result[
+        result["Municipality"] != "Gjithsej"
+    ].reset_index(drop=True)
+
+    return result[
+        [
+            "Municipality",
+            "HigherEducation",
+            "Total15Plus",
+            "HigherEducationRate"
+        ]
+    ]
+
     return df
